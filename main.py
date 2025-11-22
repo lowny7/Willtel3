@@ -23,10 +23,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
-# =================================================
-# VARIÁVEIS DE AMBIENTE (CORRIGIDAS)
-# =================================================
-
 DEFAULT_DB_URL = "postgresql://postgres:docker@localhost/telegram"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 
@@ -71,15 +67,7 @@ def parse_database_url(url: str):
 
 
 DB_PARAMS = parse_database_url(DATABASE_URL)
-logger.info(
-    "DB params: host=%s port=%s db=%s user=%s",
-    DB_PARAMS["host"], DB_PARAMS["port"], DB_PARAMS["database"], DB_PARAMS["user"]
-)
 
-
-# =================================================
-# FUNÇÕES BANCO DE DADOS
-# =================================================
 
 def _sync_run_query(sql: str, params: tuple = ()):
     conn = pg8000.connect(
@@ -117,10 +105,7 @@ def format_results(cols: List[str], rows: List[tuple], max_rows: int = 200):
         safe = []
         for v in row:
             if isinstance(v, (bytes, bytearray)):
-                try:
-                    safe.append(v.decode("utf-8", errors="replace"))
-                except Exception:
-                    safe.append(str(v))
+                safe.append(v.decode("utf-8", errors="replace"))
             elif v is None:
                 safe.append("NULL")
             else:
@@ -145,21 +130,16 @@ def query_is_safe(payload: str) -> bool:
     return True
 
 
-# =================================================
-# FASTAPI
-# =================================================
-
 class QueryIn(BaseModel):
     sql: str
 
 
 async def require_api_key(x_api_key: Optional[str] = Header(None)):
-    if HTTP_API_KEY:
-        if x_api_key != HTTP_API_KEY:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="API key inválida"
-            )
+    if HTTP_API_KEY and x_api_key != HTTP_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API key inválida"
+        )
 
 
 @app.get("/health")
@@ -175,7 +155,10 @@ async def http_table(
 ):
     await require_api_key(api_key)
     if not VALID_TABLE_RE.match(table_name):
-        raise HTTPException(status_code=400, detail="Nome de tabela inválido.")
+        raise HTTPException(
+            status_code=400,
+            detail="Nome de tabela inválido."
+        )
 
     limit = max(1, min(1000, int(limit)))
     sql = f'SELECT * FROM "{table_name}" LIMIT %s'
@@ -192,7 +175,10 @@ async def http_query(payload: QueryIn, api_key: Optional[str] = Header(None)):
     await require_api_key(api_key)
     sql = payload.sql.strip()
     if not query_is_safe(sql):
-        raise HTTPException(status_code=400, detail="Query inválida ou não permitida.")
+        raise HTTPException(
+            status_code=400,
+            detail="Query inválida ou não permitida."
+        )
     cols, rows = await run_query(sql, ())
     return {
         "columns": cols,
@@ -200,10 +186,6 @@ async def http_query(payload: QueryIn, api_key: Optional[str] = Header(None)):
         "rows_preview": [list(r) for r in rows[:200]],
     }
 
-
-# =================================================
-# TELEGRAM HANDLERS
-# =================================================
 
 telegram_app: Optional[Application] = None
 
@@ -215,20 +197,12 @@ async def is_chat_allowed(chat_id: int) -> bool:
 
 
 async def tg_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await is_chat_allowed(update.effective_chat.id):
-        await update.message.reply_text("Acesso negado.")
-        return
     await update.message.reply_text(
         "Bot ativo. Use /table <nome> [limite] ou /query <SELECT ...>"
     )
 
 
 async def tg_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if not await is_chat_allowed(chat_id):
-        await update.message.reply_text("Acesso negado.")
-        return
-
     args = context.args
     if not args:
         await update.message.reply_text("Uso: /table <nome_da_tabela> [limite]")
@@ -261,11 +235,6 @@ async def tg_table(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def tg_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    if not await is_chat_allowed(chat_id):
-        await update.message.reply_text("Acesso negado.")
-        return
-
     text = update.message.text or ""
     payload = text.partition(" ")[2].strip()
 
@@ -287,10 +256,6 @@ async def tg_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-
-# =================================================
-# WEBHOOK DO TELEGRAM (OBRIGATÓRIO NO RAILWAY)
-# =================================================
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
@@ -316,28 +281,20 @@ async def start_telegram_bot():
         webhook = f"{WEBHOOK_URL}/webhook"
         logger.info(f"Configurando Webhook: {webhook}")
         await telegram_app.bot.set_webhook(webhook)
-    else:
-        logger.error("WEBHOOK_URL não definida!")
 
 
 @app.on_event("startup")
 async def on_startup():
-    logger.info("Aplicação iniciando. PTB %s", PTB_VERSION)
     await start_telegram_bot()
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
     global telegram_app
-    if telegram_app:
-        logger.info("Encerrando Telegram bot...")
+    if telegram_app and telegram_app.running:
         await telegram_app.stop()
         telegram_app = None
 
-
-# =================================================
-# RODAR UVICORN
-# =================================================
 
 if __name__ == "__main__":
     import uvicorn
