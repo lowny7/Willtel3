@@ -1,3 +1,5 @@
-python-telegram-bot==13.17
-psycopg2-binary>=2.9
-python-dotenv>=0.21
+fastapi
+uvicorn
+pg8000
+python-telegram-bot>=20.0
+pydantic
