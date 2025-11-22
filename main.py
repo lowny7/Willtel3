@@ -341,10 +341,4 @@ async def on_shutdown():
 
 if __name__ == "__main__":
     import uvicorn
-    logger.info(f"Executando uvicorn em 0.0.0.0:{PORT}")
-    uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=PORT,
-        log_level="info"
-    )
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
